@@ -17,7 +17,7 @@ contract PrivateInvoicing {
         bytes32 id;
         address sender;
         address recipient;
-        utString encryptedAmount;    // Private amount using COTI's privacy types
+        utUint64 encryptedAmount;   // Private amount using COTI's privacy types
         utString encryptedDueDate;   // Private due date
         utString encryptedNotes;     // Private notes
         uint256 createdAt;
@@ -38,7 +38,17 @@ contract PrivateInvoicing {
     event InvoiceCreated(bytes32 indexed id, address indexed sender, address indexed recipient);
     event InvoicePaid(bytes32 indexed id, address indexed payer);
     event InvoiceMarkedLate(bytes32 indexed id);
-    
+    event InvoiceData(
+        bytes32 indexed id,
+        address indexed sender,
+        address indexed recipient,
+        ctUint64 amountCiphertext,
+        ctString dueDateCiphertext,
+        ctString notesCiphertext,
+        uint256 createdAt,
+        InvoiceStatus status
+    );
+
     /**
      * @dev Create a new invoice with encrypted data
      * @param recipient The address of the invoice recipient
@@ -49,7 +59,7 @@ contract PrivateInvoicing {
      */
     function createInvoice(
         address recipient, 
-        itString calldata amountValue,
+        itUint64 calldata amountValue,
         itString calldata dueDateValue,
         itString calldata notesValue
     ) external returns (bytes32) {
@@ -57,7 +67,7 @@ contract PrivateInvoicing {
         require(recipient != msg.sender, "Cannot send invoice to yourself");
         
         // Validate and process the encrypted inputs
-        gtString memory amount = MpcCore.validateCiphertext(amountValue);
+        gtUint64 amount = MpcCore.validateCiphertext(amountValue);
         gtString memory dueDate = MpcCore.validateCiphertext(dueDateValue);
         gtString memory notes = MpcCore.validateCiphertext(notesValue);
         
@@ -106,6 +116,20 @@ contract PrivateInvoicing {
         require(invoice.recipient == msg.sender, "Only the recipient can pay this invoice");
         require(invoice.status == InvoiceStatus.Pending, "Invoice is not in pending status");
 
+        // Onboard the encrypted amount (using the network encrypted value)
+        gtUint64 gtAmount = MpcCore.onBoard(invoice.encryptedAmount.ciphertext);
+        
+        // Convert msg.value to garbled text for comparison
+        gtUint64 gtMsgValue = MpcCore.setPublic64(uint64(msg.value));
+        
+        // Compare the values while keeping them encrypted
+        gtBool isEqual = MpcCore.eq(gtAmount, gtMsgValue);
+        
+        // Convert the boolean result to a plain value
+        bool result = MpcCore.decrypt(isEqual);
+
+        require(result, "Incorrect payment amount");
+
         // Update invoice status
         invoice.status = InvoiceStatus.Paid;
 
@@ -139,23 +163,8 @@ contract PrivateInvoicing {
     /**
      * @dev Get invoice details
      * @param invoiceId The ID of the invoice to retrieve
-     * @return sender The address of the invoice sender
-     * @return recipient The address of the invoice recipient
-     * @return amountCiphertext The encrypted amount (only decryptable by sender/recipient)
-     * @return dueDateCiphertext The encrypted due date (only decryptable by sender/recipient)
-     * @return notesCiphertext The encrypted notes (only decryptable by sender/recipient)
-     * @return createdAt The timestamp when the invoice was created
-     * @return status The current status of the invoice
      */
-    function getInvoice(bytes32 invoiceId) external view returns (
-        address sender,
-        address recipient,
-        ctString memory amountCiphertext,
-        ctString memory dueDateCiphertext,
-        ctString memory notesCiphertext,
-        uint256 createdAt,
-        InvoiceStatus status
-    ) {
+    function getInvoice(bytes32 invoiceId) external  {
         Invoice storage invoice = invoices[invoiceId];
         require(invoice.exists, "Invoice does not exist");
         
@@ -164,18 +173,24 @@ contract PrivateInvoicing {
             invoice.sender == msg.sender || invoice.recipient == msg.sender,
             "Not authorized to view this invoice"
         );
-        
-        return (
+
+        // Re-encrypt the data for the caller (msg.sender)
+        gtUint64 amountGt = MpcCore.onBoard(invoice.encryptedAmount.ciphertext);
+        gtString memory dueDateGt = MpcCore.onBoard(invoice.encryptedDueDate.ciphertext);
+        gtString memory notesGt = MpcCore.onBoard(invoice.encryptedNotes.ciphertext);
+
+        emit InvoiceData(
+            invoiceId,
             invoice.sender,
             invoice.recipient,
-            invoice.encryptedAmount.userCiphertext,
-            invoice.encryptedDueDate.userCiphertext,
-            invoice.encryptedNotes.userCiphertext,
+            MpcCore.offBoardToUser(amountGt, msg.sender),
+            MpcCore.offBoardToUser(dueDateGt, msg.sender),
+            MpcCore.offBoardToUser(notesGt, msg.sender),
             invoice.createdAt,
             invoice.status
         );
     }
-    
+
     /**
      * @dev Get all invoice IDs sent by the caller
      * @return Array of invoice IDs
