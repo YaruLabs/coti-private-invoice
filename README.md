@@ -8,9 +8,9 @@ Try running some of the following tasks:
 npx hardhat help
 npx hardhat test
 REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat ignition deploy ./ignition/modules/PrivateInvoicing.ts
+npx hardhat run scripts/deploy_invoice_token.ts
 npx hardhat run scripts/deploy_invoice.ts
+
 ```
 
 dependencies

@@ -1,25 +1,32 @@
-import hre from "hardhat"
-import { setupAccounts } from "./utils/accounts"
+import hre from "hardhat";
+import { setupAccounts } from "./utils/accounts";
 
 async function main() {
-    const [owner, otherAccount] = await setupAccounts()
-    console.log("Owner address: ", owner.address)
+  const [owner] = await setupAccounts();
+  console.log("Owner address:", owner.address);
 
-    const PrivateStorageFactory = await hre.ethers.getContractFactory("PrivateInvoicing")
-    console.log("Deploying PrivateStorage contract...")
+  const paymentTokenAddress = process.env.PAYMENT_TOKEN_ADDRESS;
+  if (!paymentTokenAddress) {
+    throw new Error("Please set PAYMENT_TOKEN_ADDRESS in your .env file");
+  }
 
-    const privateStorage = await PrivateStorageFactory
-        .connect(owner)
-        .deploy()
+  const InvoiceFactory = await hre.ethers.getContractFactory("PrivateInvoicing");
 
-    console.log("Waiting for deployment...")
-    
-    await privateStorage.waitForDeployment()
+  console.log("Deploying PrivateInvoicing contract...");
+  const invoiceContract = await InvoiceFactory.connect(owner).deploy();
+  await invoiceContract.waitForDeployment();
 
-    console.log("Contract address: ", await privateStorage.getAddress())
+  const contractAddress = await invoiceContract.getAddress();
+  console.log("PrivateInvoicing deployed at:", contractAddress);
+
+  console.log("Setting payment token address...");
+  const tx = await invoiceContract.connect(owner).setPaymentToken(paymentTokenAddress);
+  await tx.wait();
+
+  console.log("Payment token set to:", paymentTokenAddress);
 }
 
 main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-})
+  console.error(error);
+  process.exitCode = 1;
+});

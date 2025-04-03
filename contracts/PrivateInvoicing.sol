@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@coti-io/coti-contracts/contracts/utils/mpc/MpcCore.sol";
+import {PrivateERC20} from "@coti-io/coti-contracts/contracts/token/PrivateERC20/PrivateERC20.sol";
 
 /**
  * @title PrivateInvoicing
@@ -33,6 +34,8 @@ contract PrivateInvoicing {
     
     // Mapping from address to array of invoice IDs (received)
     mapping(address => bytes32[]) private receivedInvoices;
+
+    address private paymentToken;
     
     // Events
     event InvoiceCreated(bytes32 indexed id, address indexed sender, address indexed recipient);
@@ -102,7 +105,12 @@ contract PrivateInvoicing {
         emit InvoiceCreated(invoiceId, msg.sender, recipient);
         
         return invoiceId;
-    }    
+    }
+
+
+    function setPaymentToken(address _paymentToken) external {
+        paymentToken = _paymentToken;
+    }
     
     /**
      * @dev Pay an invoice
@@ -112,6 +120,7 @@ contract PrivateInvoicing {
         Invoice storage invoice = invoices[invoiceId];
 
         // Validate invoice
+        require(paymentToken != address(0), "Token address not set");
         require(invoice.exists, "Invoice does not exist");
         require(invoice.recipient == msg.sender, "Only the recipient can pay this invoice");
         require(invoice.status == InvoiceStatus.Pending, "Invoice is not in pending status");
@@ -136,6 +145,33 @@ contract PrivateInvoicing {
         // Transfer payment to the sender
         (bool success, ) = invoice.sender.call{value: msg.value}("");
         require(success, "Payment transfer failed");
+        
+        // Emit event
+        emit InvoicePaid(invoiceId, msg.sender);
+    }
+
+
+    function payInvoiceWithToken(bytes32 invoiceId) external {
+        Invoice storage invoice = invoices[invoiceId];
+        
+        // Validate invoice
+        require(invoice.exists, "Invoice does not exist");
+        require(invoice.recipient == msg.sender, "Only the recipient can pay this invoice");
+        require(invoice.status == InvoiceStatus.Pending, "Invoice is not in pending status");
+        
+        // Get the private ERC20 token
+        PrivateERC20 token = PrivateERC20(paymentToken);
+
+        gtUint64 encryptedAmount = MpcCore.onBoard(invoice.encryptedAmount.ciphertext);
+
+        token.transferFrom(
+            msg.sender,
+            invoice.sender,
+            encryptedAmount
+        );
+       
+        // Update invoice status
+        invoice.status = InvoiceStatus.Paid;
         
         // Emit event
         emit InvoicePaid(invoiceId, msg.sender);
