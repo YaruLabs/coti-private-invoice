@@ -18,9 +18,15 @@ contract PrivateInvoicing {
         bytes32 id;
         address sender;
         address recipient;
-        utUint64 encryptedAmount;   // Private amount using COTI's privacy types
-        utString encryptedDueDate;   // Private due date
-        utString encryptedNotes;     // Private notes
+
+        utUint64 encryptedAmount;
+        utString encryptedDueDate;
+        utString encryptedNotes;
+
+        ctUint64 encryptedAmountToRecipient; // Encrypted amount for recipient
+        ctString encryptedDueDateToRecipient; // Encrypted due date for recipient
+        ctString encryptedNotesToRecipient; // Encrypted notes for recipient
+        
         uint256 createdAt;
         InvoiceStatus status;
         bool exists;
@@ -90,9 +96,15 @@ contract PrivateInvoicing {
         newInvoice.id = invoiceId;
         newInvoice.sender = msg.sender;
         newInvoice.recipient = recipient;
+        
         newInvoice.encryptedAmount = MpcCore.offBoardCombined(amount, msg.sender);
         newInvoice.encryptedDueDate = MpcCore.offBoardCombined(dueDate, msg.sender);
         newInvoice.encryptedNotes = MpcCore.offBoardCombined(notes, msg.sender);
+
+        newInvoice.encryptedAmountToRecipient = MpcCore.offBoardToUser(amount, recipient);
+        newInvoice.encryptedDueDateToRecipient = MpcCore.offBoardToUser(dueDate, recipient);
+        newInvoice.encryptedNotesToRecipient = MpcCore.offBoardToUser(notes, recipient);
+
         newInvoice.createdAt = block.timestamp;
         newInvoice.status = InvoiceStatus.Pending;
         newInvoice.exists = true;
@@ -200,7 +212,7 @@ contract PrivateInvoicing {
      * @dev Get invoice details
      * @param invoiceId The ID of the invoice to retrieve
      */
-    function getInvoice(bytes32 invoiceId) external  {
+    function getInvoiceToUser(bytes32 invoiceId) external  {
         Invoice storage invoice = invoices[invoiceId];
         require(invoice.exists, "Invoice does not exist");
         
@@ -225,6 +237,46 @@ contract PrivateInvoicing {
             invoice.createdAt,
             invoice.status
         );
+    }
+
+    function getInvoice(bytes32 invoiceId) external view returns (
+        address sender,
+        address recipient,
+        ctUint64 amountCiphertext,
+        ctString memory dueDateCiphertext,
+        ctString memory notesCiphertext,
+        uint256 createdAt,
+        InvoiceStatus status
+    ) {
+        Invoice storage invoice = invoices[invoiceId];
+        require(invoice.exists, "Invoice does not exist");
+        
+        require(
+            invoice.sender == msg.sender || invoice.recipient == msg.sender,
+            "Not authorized to view this invoice"
+        );
+
+        if (msg.sender == invoice.sender) {
+            return (
+                invoice.sender,
+                invoice.recipient,
+                invoice.encryptedAmount.userCiphertext,
+                invoice.encryptedDueDate.userCiphertext,
+                invoice.encryptedNotes.userCiphertext,
+                invoice.createdAt,
+                invoice.status
+            );
+        } else {
+            return (
+                invoice.sender,
+                invoice.recipient,
+                invoice.encryptedAmountToRecipient,
+                invoice.encryptedDueDateToRecipient,
+                invoice.encryptedNotesToRecipient,
+                invoice.createdAt,
+                invoice.status
+            );
+        }
     }
 
     /**
